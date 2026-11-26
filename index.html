@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>特斯拉涂装生成器 · 车机喷漆车间</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#ffffff; --border:#e2e4e8; --text:#1a1d21;
+  --muted:#6b7280; --accent:#185fa5; --accent-hover:#0c447c;
+  --danger:#a32d2d; --ok:#0f6e56; --radius:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  background:var(--bg); color:var(--text); line-height:1.6; min-height:100vh;
+}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:16px 24px;position:sticky;top:0;z-index:10}
+header .wrap{max-width:1180px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:18px;font-weight:600}
+header .sub{font-size:12px;color:var(--muted)}
+main{max-width:1180px;margin:0 auto;padding:24px;display:grid;grid-template-columns:400px 1fr;gap:24px}
+
+/* 移动端适配 */
+@media(max-width:860px){
+  main{grid-template-columns:1fr;padding:12px;gap:16px;display:flex;flex-direction:column}
+  .preview-card{order:1}
+  .control-card{order:2}
+  header{padding:12px 16px;position:static}
+  header h1{font-size:16px}
+  header .sub{font-size:11px}
+  .card{padding:14px}
+  /* 预览图吸顶固定，滚动时始终可见 */
+  .preview .stage{max-width:100%;touch-action:none;max-height:50vh}
+  .preview-card{order:1;position:sticky;top:0;z-index:9;background:var(--card);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  .preview-card h2{display:none}
+  /* 放大触控目标 */
+  .btn{padding:12px 16px;font-size:15px}
+  .tab{padding:10px 14px;font-size:14px}
+  select,input[type=text]{font-size:16px;padding:12px}
+  .tool-row label{min-width:48px}
+  .tool-row input[type=range]{min-height:28px}
+  .hint,.status{font-size:13px}
+  .drop{padding:28px 16px}
+}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.card h2{font-size:15px;font-weight:600;margin-bottom:12px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+select,input[type=file],input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff}
+
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.tab{
+  padding:8px 12px;border:1px solid var(--border);border-radius:8px;text-align:center;
+  font-size:13px;cursor:pointer;background:#fafbfc;color:var(--muted);user-select:none;transition:.15s;position:relative;
+}
+.tab:hover{border-color:var(--accent);color:var(--accent)}
+.tab.active{background:#eef4fb;border-color:var(--accent);color:var(--accent);font-weight:500}
+.tab.inactive{opacity:.55}
+.tab.inactive:hover{opacity:.85}
+.tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c4c7cc;margin-right:5px}
+.tab.fixed .dot{background:var(--ok)}
+.tab .del{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:50%;background:var(--danger);color:#fff;font-size:11px;line-height:16px;text-align:center;display:none}
+.tab:hover .del{display:block}
+
+.new-region{display:flex;gap:8px;margin-bottom:14px}
+.new-region input{flex:1}
+
+.drop{border:2px dashed var(--border);border-radius:var(--radius);padding:24px 16px;text-align:center;color:var(--muted);cursor:pointer;transition:.15s}
+.drop:hover,.drop.drag{border-color:var(--accent);color:var(--accent)}
+.drop .big{font-size:14px;color:var(--text);margin-bottom:4px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 16px;border:none;border-radius:8px;font-size:14px;cursor:pointer;background:var(--accent);color:#fff;transition:.15s;width:100%}
+.btn:hover{background:var(--accent-hover)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--text);border:1px solid var(--border)}
+.btn.ghost:hover{background:#f0f1f3}
+.btn.fixed-btn{background:var(--ok)}
+.btn-row{display:flex;gap:10px}
+.btn-row .btn{flex:1}
+
+.preview{display:flex;flex-direction:column;gap:12px;align-items:center}
+.preview .stage{position:relative;width:100%;max-width:520px;aspect-ratio:1/1;background:repeating-conic-gradient(#eef0f2 0% 25%, #fff 0% 50%) 0 0/20px 20px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.preview .stage canvas{position:absolute;inset:0;width:100%;height:100%}
+
+.edit-tools{width:100%;max-width:520px;display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafbfc}
+.tool-row{display:flex;align-items:center;gap:10px;font-size:13px}
+.tool-row label{min-width:52px;color:var(--muted)}
+.tool-row input[type=range]{flex:1}
+.tool-row input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+.tool-row .btn{width:auto;padding:6px 12px;font-size:12px}
+.stage{cursor:pointer}
+.stage.drag{cursor:grabbing}
+.hint{font-size:12px;color:var(--muted)}
+.status{font-size:13px;margin-top:8px;min-height:20px}
+.status.ok{color:var(--ok)} .status.err{color:var(--danger)}
+.note{background:#eef4fb;border:1px solid #b5d4f4;border-radius:8px;padding:12px;font-size:12px;color:#185fa5;margin-top:12px}
+.region-hint{font-size:12px;color:#b45309;background:#fef3c7;border-radius:6px;padding:8px;margin-top:10px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:r .7s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div>
+      <h1>特斯拉涂装生成器</h1>
+      <div class="sub">固定区域 → 点选部件绑定 → 上传图片拖拽调整固定</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="card control-card">
+    <h2>0. 选择车型模板</h2>
+    <div class="field">
+      <select id="templateSelect">
+        <option value="model3">Model 3（2024 标准）</option>
+        <option value="model3_perf">Model 3（2024 高性能）</option>
+        <option value="model3_2022" selected>Model 3（2022 及更早）</option>
+        <option value="modely">Model Y（2025 标准）</option>
+        <option value="modely_perf">Model Y（2025 高性能）</option>
+        <option value="modely_premium">Model Y（2025 豪华）</option>
+        <option value="modely_2022">Model Y（2022 及更早）</option>
+        <option value="models">Model S（2025 Plaid）</option>
+        <option value="modelx">Model X（2021）</option>
+        <option value="cybertruck">Cybertruck</option>
+        <option value="custom">自定义模板（上传）</option>
+      </select>
+    </div>
+    <div class="field" id="customTemplateField" style="display:none">
+      <div class="drop" id="templateDropZone" style="padding:16px">
+        <div class="big">点击上传自定义模板 PNG</div>
+        <div>需为特斯拉车衣模板（白色膜片 + 透明间隙）</div>
+      </div>
+      <input type="file" id="templateFileInput" accept="image/png" hidden>
+    </div>
+
+    <h2>1. 选择车身区域</h2>
+    <div class="tabs" id="tabs"></div>
+
+    <h2>2. 绑定部件</h2>
+    <div class="region-hint" id="bindHint" style="margin-bottom:12px">
+      在右侧预览图上<b>点击膜片部件</b>（可多选），将选中部件绑定到当前区域。选完后点「锁定部件」，之后即可拖拽图片。
+    </div>
+    <div class="btn-row" style="margin-bottom:14px">
+      <button class="btn" id="lockBtn" disabled>锁定部件</button>
+    </div>
+
+    <h2>3. 上传图片</h2>
+    <div class="field">
+      <div class="drop" id="dropZone">
+        <div class="big">点击或拖拽图片到此处</div>
+        <div>支持 JPG / PNG，贴到当前区域绑定的部件</div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" hidden>
+    </div>
+
+    <div class="edit-tools" id="editTools" style="display:none">
+      <div class="tool-row">
+        <label>缩放</label>
+        <input type="range" id="scaleSlider" min="10" max="1000" value="100">
+        <span id="scaleLabel">100%</span>
+      </div>
+      <div class="tool-row">
+        <label>旋转</label>
+        <input type="range" id="rotateSlider" min="0" max="360" value="0">
+        <span id="rotateLabel">0°</span>
+      </div>
+      <div class="tool-row">
+        <button class="btn ghost" id="resetBtn">重置</button>
+        <button class="btn ghost" id="centerBtn">居中</button>
+      </div>
+      <div class="hint" style="text-align:left">拖动图片调整位置，滚轮/滑杆缩放，旋转滑杆调角度</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn" id="fixBtn" disabled>固定到当前区域</button>
+      <button class="btn ghost" id="unfixBtn" disabled>取消固定</button>
+    </div>
+
+    <h2 style="margin-top:18px">4. 空白区域填充</h2>
+    <div class="tool-row" style="margin-bottom:8px">
+      <label>填充色</label>
+      <input type="color" id="fillColor" value="#ffffff">
+      <button class="btn ghost" id="fillBtn" style="width:auto;padding:6px 12px">填充未贴图区域</button>
+      <button class="btn ghost" id="clearFillBtn" style="width:auto;padding:6px 12px">清除</button>
+    </div>
+
+    <div class="status" id="status">加载中…</div>
+
+    <div class="note">
+      生成规则：PNG · 严格 1024×1024 · ≤1MB · 自动规范命名。<br>
+      使用路径：玩具盒 → 喷漆车间 → Wraps。
+    </div>
+  </div>
+
+  <div class="card preview-card" style="padding:10px">
+    <h2>预览（点击膜片部件绑定）</h2>
+    <div class="preview" style="gap:6px">
+      <div class="stage" id="stage">
+        <canvas id="previewCanvas"></canvas>
+      </div>
+      <div class="tool-row" style="width:100%;max-width:520px;gap:6px">
+        <label>边框</label>
+        <input type="checkbox" id="borderToggle" checked>
+        <button class="btn ghost" id="shareBtn" disabled>分享晒图</button>
+        <button class="btn ghost" id="downloadBtn" disabled>下载 PNG</button>
+      </div>
+      <div class="hint" id="previewHint" style="font-size:11px;line-height:1.4">蓝=未绑定 · 红=当前区域 · 橙=已绑定未固定 · 绿=已固定</div>
+      <div class="hint" style="text-align:center;line-height:1.4;font-size:11px">
+        操作：点选部件绑定 → 锁定后<b>单指拖拽</b>位置、<b>双指捏合</b>缩放、滑杆调旋转
+      </div>
+    </div>
+  </div>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
