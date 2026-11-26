@@ -17,6 +17,13 @@ const BUILTIN_TEMPLATES = {
 let currentTemplateUrl = BUILTIN_TEMPLATES.model3_2022;
 let customTemplateImage = null; // 自定义上传的模板 Image
 
+// 手动切割：cutMask 记录用户画的切割线经过的膜片像素，连通域分析时视为"非膜片"，从而切开实心块
+let cutMask = null;   // Uint8Array，被切割的像素标记
+let cutMode = false;  // 是否处于切割模式
+let cutting = false;  // 是否正在画切割线
+let cutLastPos = null; // 上一条切割点（用于 Bresenham 连线）
+let cutHistory = [];  // 切割历史快照（每次切割前保存 cutMask 副本，用于回退）
+
 // 模板预处理结果
 let templatePrep = null;     // { W, H, mask, edge, components }
 // components: 每个连通部件 { id, mask(Uint8Array), bbox }
@@ -50,6 +57,8 @@ const downloadBtn = $('downloadBtn');
 const shareBtn = $('shareBtn');
 const statusEl = $('status');
 const previewCanvas = $('previewCanvas');
+const cutModeBtn = $('cutModeBtn');
+const undoCutBtn = $('undoCutBtn');
 const borderToggle = $('borderToggle');
 const previewHint = $('previewHint');
 const fillColor = $('fillColor');
@@ -77,6 +86,9 @@ async function prepareTemplate(force = false) {
   const mask = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) if (data[i * 4 + 3] > 0) mask[i] = 1;
 
+  // 初始化切割掩码（切换模板时重置）
+  if (!cutMask || cutMask.length !== W * H) cutMask = new Uint8Array(W * H);
+
   // 边缘
   const edge = new Uint8Array(W * H);
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
@@ -84,26 +96,29 @@ async function prepareTemplate(force = false) {
     if (mask[i] && (!mask[i - 1] || !mask[i + 1] || !mask[i - W] || !mask[i + W])) edge[i] = 1;
   }
 
-  // 连通域
+  // 连通域（被切割的像素 cutMask 视为"非膜片"，从而把实心块拆开）
   const visited = new Uint8Array(W * H);
   const components = [];
   let cid = 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    if (!mask[y * W + x] || visited[y * W + x]) continue;
+    const idx = y * W + x;
+    if (!mask[idx] || cutMask[idx] || visited[idx]) continue;
     const q = [[x, y]];
-    visited[y * W + x] = 1;
+    visited[idx] = 1;
     const cmask = new Uint8Array(W * H);
     let minX = x, maxX = x, minY = y, maxY = y, cnt = 0;
     while (q.length) {
       const [cx, cy] = q.pop();
-      cmask[cy * W + cx] = 1;
+      const ci = cy * W + cx;
+      cmask[ci] = 1;
       cnt++;
       if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
       if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = cx + dx, ny = cy + dy;
-        if (nx >= 0 && nx < W && ny >= 0 && ny < H && mask[ny * W + nx] && !visited[ny * W + nx]) {
-          visited[ny * W + nx] = 1;
+        const ni = ny * W + nx;
+        if (nx >= 0 && nx < W && ny >= 0 && ny < H && mask[ni] && !cutMask[ni] && !visited[ni]) {
+          visited[ni] = 1;
           q.push([nx, ny]);
         }
       }
@@ -115,8 +130,7 @@ async function prepareTemplate(force = false) {
   components.forEach((c, i) => c.id = i);
 
   // 预计算每个部件的"间隙边缘"像素（描边用）
-  // 描边画在部件外侧的透明间隙里，而不是部件内部边缘，
-  // 这样窄间隙会被清晰的分隔线标记，不会视觉粘连
+  // 描边画在部件外侧的透明间隙里，而不是部件内部边缘，避免窄间隙视觉粘连
   for (const c of components) {
     const edgePixels = [];
     const cm = c.mask;
@@ -134,6 +148,59 @@ async function prepareTemplate(force = false) {
 
   templatePrep = { W, H, mask, edge, components };
   return templatePrep;
+}
+
+// 重新分析连通域（切割后调用）：不重新加载图片，只重算 components
+function reanalyzeComponents() {
+  if (!templatePrep) return;
+  const { W, H, mask, edge } = templatePrep;
+  const visited = new Uint8Array(W * H);
+  const components = [];
+  let cid = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const idx = y * W + x;
+    if (!mask[idx] || cutMask[idx] || visited[idx]) continue;
+    const q = [[x, y]];
+    visited[idx] = 1;
+    const cmask = new Uint8Array(W * H);
+    let minX = x, maxX = x, minY = y, maxY = y, cnt = 0;
+    while (q.length) {
+      const [cx, cy] = q.pop();
+      const ci = cy * W + cx;
+      cmask[ci] = 1;
+      cnt++;
+      if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+      if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, ny = cy + dy;
+        const ni = ny * W + nx;
+        if (nx >= 0 && nx < W && ny >= 0 && ny < H && mask[ni] && !cutMask[ni] && !visited[ni]) {
+          visited[ni] = 1;
+          q.push([nx, ny]);
+        }
+      }
+    }
+    components.push({ id: cid++, mask: cmask, bbox: { minX, minY, maxX, maxY }, area: cnt });
+  }
+  components.sort((a, b) => b.area - a.area);
+  components.forEach((c, i) => c.id = i);
+
+  // 间隙外缘描边（与 prepareTemplate 一致）
+  for (const c of components) {
+    const edgePixels = [];
+    const cm = c.mask;
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (!cm[i] && (cm[i - 1] || cm[i + 1] || cm[i - W] || cm[i + W])) {
+          edgePixels.push(i);
+        }
+      }
+    }
+    c.edgePixels = edgePixels;
+  }
+
+  templatePrep.components = components;
 }
 
 // ---------- 区域管理（5 个固定区域）----------
@@ -204,11 +271,22 @@ function pointersDistance() {
 }
 
 previewCanvas.addEventListener('pointerdown', (e) => {
-  const region = getActiveRegion();
-  if (!region) return;
   const p = getCanvasPos(e);
   activePointers.set(e.pointerId, p);
   try { previewCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+  // 切割模式：开始画切割线（最高优先级）
+  if (cutMode) {
+    cutting = true;
+    cutLastPos = p;
+    // 保存切割前的快照，用于回退
+    if (cutMask) cutHistory.push(new Uint8Array(cutMask));
+    e.preventDefault();
+    return;
+  }
+
+  const region = getActiveRegion();
+  if (!region) return;
 
   // 未锁定：点击 = 点选/取消部件
   if (!region.locked) {
@@ -243,10 +321,19 @@ previewCanvas.addEventListener('pointerdown', (e) => {
 });
 
 previewCanvas.addEventListener('pointermove', (e) => {
-  const region = getActiveRegion();
-  if (!region || !region.image || region.fixed) return;
   const p = getCanvasPos(e);
   if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, p);
+
+  // 切割模式：沿路径标记切割线
+  if (cutMode && cutting && cutLastPos) {
+    markCutLine(cutLastPos, p);
+    cutLastPos = p;
+    renderPreview();
+    return;
+  }
+
+  const region = getActiveRegion();
+  if (!region || !region.image || region.fixed) return;
 
   // 双指缩放
   if (activePointers.size === 2 && pinchState) {
@@ -272,6 +359,18 @@ previewCanvas.addEventListener('pointermove', (e) => {
 previewCanvas.addEventListener('pointerup', (e) => {
   activePointers.delete(e.pointerId);
   if (activePointers.size < 2) pinchState = null;
+
+  // 切割结束：重新分析连通域
+  if (cutMode && cutting) {
+    cutting = false;
+    cutLastPos = null;
+    reanalyzeComponents();
+    renderPreview();
+    renderTabs();
+    setStatus('切割完成，已重新划分部件');
+    return;
+  }
+
   if (activePointers.size === 0) {
     if (dragMode) {
       dragMode = false;
@@ -299,6 +398,49 @@ function hitComponent(x, y) {
   }
   return null;
 }
+
+// 沿两点连线（Bresenham）标记切割线经过的膜片像素
+function markCutLine(p1, p2) {
+  if (!templatePrep || !cutMask) return;
+  const W = templatePrep.W, H = templatePrep.H;
+  let x0 = Math.round(p1.x), y0 = Math.round(p1.y);
+  let x1 = Math.round(p2.x), y1 = Math.round(p2.y);
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  for (let n = 0; n < 100000; n++) {
+    if (x0 >= 0 && x0 < W && y0 >= 0 && y0 < H) {
+      const i = y0 * W + x0;
+      if (templatePrep.mask[i]) cutMask[i] = 1;
+    }
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+}
+
+// 切割模式切换按钮
+cutModeBtn.addEventListener('click', () => {
+  cutMode = !cutMode;
+  cutModeBtn.textContent = cutMode ? '退出切割' : '切割模式';
+  cutModeBtn.classList.toggle('danger', cutMode);
+  previewCanvas.style.cursor = cutMode ? 'crosshair' : 'pointer';
+  setStatus(cutMode ? '切割模式：在预览图上画线切开连成一片的区域' : '已退出切割模式');
+});
+
+// 回退上一步切割
+undoCutBtn.addEventListener('click', () => {
+  if (cutHistory.length === 0) {
+    setStatus('没有可回退的切割操作', true);
+    return;
+  }
+  cutMask = cutHistory.pop();
+  reanalyzeComponents();
+  renderPreview();
+  renderTabs();
+  setStatus('已回退上一步切割');
+});
 
 // ---------- 图片上传 ----------
 function handleFile(file) {
@@ -428,7 +570,7 @@ function renderPreview() {
     for (const c of components) {
       if (usedCompIds.has(c.id)) continue; // 已绑定区域不填充
       for (let i = 0; i < W * H; i++) {
-        if (c.mask[i]) {
+        if (c.mask[i] && !cutMask[i]) { // 切割线像素不填充，显示为透明缝
           fd.data[i * 4] = fill.r;
           fd.data[i * 4 + 1] = fill.g;
           fd.data[i * 4 + 2] = fill.b;
@@ -520,7 +662,7 @@ function updateResult() {
     for (const c of components) {
       if (usedCompIds.has(c.id)) continue; // 已绑定区域不填充
       for (let i = 0; i < W * H; i++) {
-        if (c.mask[i]) {
+        if (c.mask[i] && !cutMask[i]) { // 切割线像素不填充
           fd.data[i * 4] = fill.r;
           fd.data[i * 4 + 1] = fill.g;
           fd.data[i * 4 + 2] = fill.b;
@@ -799,6 +941,13 @@ async function switchTemplate() {
   activeRegionId = null;
   resultCanvas = null;
   fillColorValue = null;
+  cutMask = null; // 清空切割线
+  cutHistory = []; // 清空切割历史
+  cutMode = false;
+  cutting = false;
+  cutLastPos = null;
+  cutModeBtn.textContent = '切割模式';
+  cutModeBtn.classList.remove('danger');
   initRegions();
   renderTabs();
   updateRegionUI();

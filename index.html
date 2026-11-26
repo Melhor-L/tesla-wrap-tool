@@ -76,6 +76,10 @@ select,input[type=file],input[type=text]{width:100%;padding:10px 12px;border:1px
 .btn.ghost{background:#fff;color:var(--text);border:1px solid var(--border)}
 .btn.ghost:hover{background:#f0f1f3}
 .btn.fixed-btn{background:var(--ok)}
+.btn.danger{background:var(--danger)}
+.btn.cut{background:#d97706}
+.btn.cut:hover{background:#b45309}
+.btn.cut.danger{background:var(--danger)}
 .btn-row{display:flex;gap:10px}
 .btn-row .btn{flex:1}
 
@@ -138,6 +142,13 @@ select,input[type=file],input[type=text]{width:100%;padding:10px 12px;border:1px
 
     <h2>1. 选择车身区域</h2>
     <div class="tabs" id="tabs"></div>
+    <div class="field" style="margin-bottom:14px">
+      <div style="display:flex;gap:8px">
+        <button class="btn cut" id="cutModeBtn" style="padding:6px 12px;font-size:12px;width:auto">切割模式</button>
+        <button class="btn" id="undoCutBtn" style="padding:6px 12px;font-size:12px;width:auto">回退切割</button>
+      </div>
+      <div class="hint" style="margin-top:6px">连成一片的车头/机盖等，点「切割模式」后在预览图画线切开</div>
+    </div>
 
     <h2>2. 绑定部件</h2>
     <div class="region-hint" id="bindHint" style="margin-bottom:12px">
