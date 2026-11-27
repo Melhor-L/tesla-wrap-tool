@@ -148,6 +148,12 @@ select,input[type=file],input[type=text]{width:100%;padding:10px 12px;border:1px
         <button class="btn" id="undoCutBtn" style="padding:6px 12px;font-size:12px;width:auto">回退切割</button>
       </div>
       <div class="hint" style="margin-top:6px">连成一片的车头/机盖等，点「切割模式」后在预览图画线切开</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn" id="exportCutBtn" style="padding:6px 12px;font-size:12px;width:auto;background:#0f6e56">导出模板</button>
+        <button class="btn ghost" id="importCutBtn" style="padding:6px 12px;font-size:12px;width:auto">导入模板</button>
+        <input type="file" id="importCutInput" accept="application/json,.json" hidden>
+      </div>
+      <div class="hint" style="margin-top:6px">切割好后点「导出模板」保存 JSON，下次「导入模板」即可永久复用</div>
     </div>
 
     <h2>2. 绑定部件</h2>
